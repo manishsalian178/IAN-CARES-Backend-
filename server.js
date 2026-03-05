@@ -63,9 +63,20 @@ if (!MONGO_URI) {
     process.exit(1);
 }
 
-mongoose.connect(MONGO_URI)
-    .then(() => console.log('Connected to MongoDB'))
-    .catch(err => console.error('Could not connect to MongoDB', err));
+const connectDB = async () => {
+    try {
+        await mongoose.connect(MONGO_URI, {
+            serverSelectionTimeoutMS: 5000, // Fail fast after 5 seconds
+        });
+        console.log('Connected to MongoDB');
+    } catch (err) {
+        console.error('Could not connect to MongoDB', err);
+        // If we can't connect, we might want to exit unless we're in a specific environment
+        if (process.env.NODE_ENV === 'production') {
+            process.exit(1);
+        }
+    }
+};
 
 // Multer Config for Image Uploads
 const upload = multer({ storage: storage });
@@ -87,6 +98,12 @@ const verifyToken = (req, res, next) => {
 app.post('/api/auth/login', async (req, res) => {
     try {
         const { username, password } = req.body;
+
+        // Check database connection state
+        if (mongoose.connection.readyState !== 1) {
+            return res.status(503).json({ error: 'Database connection is not ready' });
+        }
+
         const user = await User.findOne({ username });
         if (!user) return res.status(404).json({ error: 'User not found' });
 
@@ -317,6 +334,11 @@ app.delete('/api/journey/:id', verifyToken, async (req, res) => {
     }
 });
 
-app.listen(PORT, () => {
-    console.log(`Server running on port ${PORT}`);
-});
+const startServer = async () => {
+    await connectDB();
+    app.listen(PORT, () => {
+        console.log(`Server running on port ${PORT}`);
+    });
+};
+
+startServer();
