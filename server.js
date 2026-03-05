@@ -5,6 +5,8 @@ const multer = require('multer');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
+const cloudinary = require('cloudinary').v2;
+const { CloudinaryStorage } = require('multer-storage-cloudinary');
 require('dotenv').config();
 
 const Blog = require('./models/Blog');
@@ -20,11 +22,22 @@ const PORT = process.env.PORT || 8888;
 app.use(cors());
 app.use(express.json());
 app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+// Cloudinary Configuration
+cloudinary.config({
+    cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+    api_key: process.env.CLOUDINARY_API_KEY,
+    api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
-// Ensure uploads directory exists
-if (!fs.existsSync('./uploads')) {
-    fs.mkdirSync('./uploads');
-}
+// Multer Config for Cloudinary
+const storage = new CloudinaryStorage({
+    cloudinary: cloudinary,
+    params: {
+        folder: 'ian-cares',
+        allowed_formats: ['jpg', 'png', 'jpeg', 'webp'],
+        public_id: (req, file) => Date.now() + '-' + path.parse(file.originalname).name
+    }
+});
 
 // MongoDB Connection
 const MONGO_URI = process.env.MONGO_URI;
@@ -39,15 +52,6 @@ mongoose.connect(MONGO_URI)
     .catch(err => console.error('Could not connect to MongoDB', err));
 
 // Multer Config for Image Uploads
-const storage = multer.diskStorage({
-    destination: (req, file, cb) => {
-        cb(null, 'uploads/');
-    },
-    filename: (req, file, cb) => {
-        cb(null, Date.now() + '-' + file.originalname);
-    }
-});
-
 const upload = multer({ storage: storage });
 
 // Middleware to verify JWT
@@ -112,7 +116,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/blog', verifyToken, upload.single('image'), async (req, res) => {
     try {
         const { title, expert, content } = req.body;
-        const image = req.file ? `/uploads/${req.file.filename}` : null;
+        const image = req.file ? req.file.path : null;
 
         const newBlog = new Blog({ title, expert, content, image });
         await newBlog.save();
@@ -136,7 +140,7 @@ app.get('/api/blog', async (req, res) => {
 app.post('/api/gallery', verifyToken, upload.single('image'), async (req, res) => {
     try {
         const { title, category } = req.body;
-        const image = req.file ? `/uploads/${req.file.filename}` : null;
+        const image = req.file ? req.file.path : null;
 
         const newGallery = new Gallery({ title, category, image });
         await newGallery.save();
@@ -160,7 +164,7 @@ app.get('/api/gallery', async (req, res) => {
 app.post('/api/journey', verifyToken, upload.single('image'), async (req, res) => {
     try {
         const { name, shortDescription, content } = req.body;
-        const image = req.file ? `/uploads/${req.file.filename}` : null;
+        const image = req.file ? req.file.path : null;
 
         const newJourney = new Journey({ name, shortDescription, content, image });
         await newJourney.save();
@@ -215,14 +219,7 @@ app.put('/api/blog/:id', verifyToken, upload.single('image'), async (req, res) =
         const updateData = { title, expert, content };
 
         if (req.file) {
-            const blog = await Blog.findById(req.params.id);
-            if (blog && blog.image) {
-                const oldImagePath = path.join(__dirname, 'uploads', path.basename(blog.image));
-                if (fs.existsSync(oldImagePath)) {
-                    fs.unlinkSync(oldImagePath);
-                }
-            }
-            updateData.image = `/uploads/${req.file.filename}`;
+            updateData.image = req.file.path;
         }
 
         const updatedBlog = await Blog.findByIdAndUpdate(req.params.id, updateData, { new: true });
@@ -240,14 +237,7 @@ app.put('/api/gallery/:id', verifyToken, upload.single('image'), async (req, res
         const updateData = { title, category };
 
         if (req.file) {
-            const gallery = await Gallery.findById(req.params.id);
-            if (gallery && gallery.image) {
-                const oldImagePath = path.join(__dirname, 'uploads', path.basename(gallery.image));
-                if (fs.existsSync(oldImagePath)) {
-                    fs.unlinkSync(oldImagePath);
-                }
-            }
-            updateData.image = `/uploads/${req.file.filename}`;
+            updateData.image = req.file.path;
         }
 
         const updatedGallery = await Gallery.findByIdAndUpdate(req.params.id, updateData, { new: true });
@@ -265,14 +255,7 @@ app.put('/api/journey/:id', verifyToken, upload.single('image'), async (req, res
         const updateData = { name, shortDescription, content };
 
         if (req.file) {
-            const journey = await Journey.findById(req.params.id);
-            if (journey && journey.image) {
-                const oldImagePath = path.join(__dirname, 'uploads', path.basename(journey.image));
-                if (fs.existsSync(oldImagePath)) {
-                    fs.unlinkSync(oldImagePath);
-                }
-            }
-            updateData.image = `/uploads/${req.file.filename}`;
+            updateData.image = req.file.path;
         }
 
         const updatedJourney = await Journey.findByIdAndUpdate(req.params.id, updateData, { new: true });
@@ -290,13 +273,6 @@ app.delete('/api/blog/:id', verifyToken, async (req, res) => {
         const deletedBlog = await Blog.findByIdAndDelete(req.params.id);
         if (!deletedBlog) return res.status(404).json({ error: 'Blog not found' });
 
-        if (deletedBlog.image) {
-            const filePath = path.join(__dirname, 'uploads', path.basename(deletedBlog.image));
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
-        }
-
         res.status(200).json({ message: 'Blog deleted successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -308,13 +284,6 @@ app.delete('/api/gallery/:id', verifyToken, async (req, res) => {
         const deletedGallery = await Gallery.findByIdAndDelete(req.params.id);
         if (!deletedGallery) return res.status(404).json({ error: 'Gallery item not found' });
 
-        if (deletedGallery.image) {
-            const filePath = path.join(__dirname, 'uploads', path.basename(deletedGallery.image));
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
-        }
-
         res.status(200).json({ message: 'Gallery item deleted successfully' });
     } catch (error) {
         res.status(500).json({ error: error.message });
@@ -325,13 +294,6 @@ app.delete('/api/journey/:id', verifyToken, async (req, res) => {
     try {
         const deletedJourney = await Journey.findByIdAndDelete(req.params.id);
         if (!deletedJourney) return res.status(404).json({ error: 'Journey not found' });
-
-        if (deletedJourney.image) {
-            const filePath = path.join(__dirname, 'uploads', path.basename(deletedJourney.image));
-            if (fs.existsSync(filePath)) {
-                fs.unlinkSync(filePath);
-            }
-        }
 
         res.status(200).json({ message: 'Journey deleted successfully' });
     } catch (error) {
